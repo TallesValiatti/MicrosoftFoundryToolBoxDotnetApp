@@ -1,6 +1,14 @@
-@ToolboxesAgent.Api_HostAddress = http://localhost:5011
+@host = http://localhost:5011
 
-GET {{ToolboxesAgent.Api_HostAddress}}/weatherforecast/
-Accept: application/json
+### Create Conversation
+POST {{host}}/conversations
+Content-Type: application/json
 
-###
+### Send Message
+POST {{host}}/messages
+Content-Type: application/json
+
+{
+  "conversationId": "CONVERSATION_ID_HERE",
+  "message": "Explain how Azure Functions TimerTrigger works and provide a short C# example."
+}

@@ -4,9 +4,14 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <NoWarn>AAIP001;OPENAI001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Azure.AI.Projects" Version="*-*" />
+    <PackageReference Include="Azure.AI.Projects.Agents" Version="*-*" />
+    <PackageReference Include="Azure.AI.Extensions.OpenAI" Version="*-*" />
+    <PackageReference Include="Azure.Identity" Version="*" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />
   </ItemGroup>
 
