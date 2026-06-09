@@ -109,11 +109,14 @@ public class AgentService(
             toolCallApprovalPolicy: new McpToolCallApprovalPolicy(
                 GlobalMcpToolCallApprovalPolicy.NeverRequireApproval));
 
-        ProjectsAgentTool projectTool = ProjectsAgentTool.AsProjectTool(mcpTool);
+        ProjectsAgentTool mcpProjectTool = ProjectsAgentTool.AsProjectTool(mcpTool);
+
+        ProjectsAgentTool webSearchProjectTool = ProjectsAgentTool.AsProjectTool(
+            ResponseTool.CreateWebSearchTool());
 
         return await toolboxClient.CreateToolboxVersionAsync(
             name: _options.ToolboxName,
-            tools: [projectTool],
+            tools: [mcpProjectTool, webSearchProjectTool],
             description: _options.ToolboxDescription,
             cancellationToken: cancellationToken);
     }
@@ -179,7 +182,10 @@ public class AgentService(
         DeclarativeAgentDefinition agentDefinition = new(_options.ModelDeploymentName)
         {
             Instructions = _options.AgentInstructions,
-            Tools = { toolboxMcpTool }
+            Tools =
+            {
+                toolboxMcpTool
+            }
         };
 
         return projectClient.AgentAdministrationClient.CreateAgentVersion(
