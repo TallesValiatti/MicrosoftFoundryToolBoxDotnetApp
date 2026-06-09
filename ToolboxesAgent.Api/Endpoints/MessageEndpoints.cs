@@ -12,7 +12,7 @@ public static partial class MessageEndpoints
 
     private static async Task<IResult> SendMessageAsync(
         SendMessageRequest request,
-        MsftFoundryService service)
+        AgentService service)
     {
         var response = await service.SendMessageAsync(request.ConversationId, request.Message);
 

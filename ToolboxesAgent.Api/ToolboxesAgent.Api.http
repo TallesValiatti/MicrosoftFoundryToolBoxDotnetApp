@@ -9,6 +9,6 @@ POST {{host}}/messages
 Content-Type: application/json
 
 {
-  "conversationId": "CONVERSATION_ID_HERE",
-  "message": "Explain how Azure Functions TimerTrigger works and provide a short C# example."
+  "conversationId": "8165642c77904c799c8fd9ac13937b89",
+  "message": "Explain how Azure Functions TimerTrigger works and provide a short C# example. Is is required to consume this info using the MCP. If no awnser is received, respond 'I could not find the answer to your question.'"
 }

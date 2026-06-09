@@ -7,11 +7,11 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
 
-builder.Services.Configure<MsftFoundryOptions>(
-    builder.Configuration.GetSection("MsftFoundry"));
+builder.Services.Configure<ApplicationOptions>(
+    builder.Configuration.GetSection("Application"));
 
 builder.Services.AddSingleton<TokenCredential>(new DefaultAzureCredential());
-builder.Services.AddSingleton<MsftFoundryService>();
+builder.Services.AddSingleton<AgentService>();
 
 var app = builder.Build();
 

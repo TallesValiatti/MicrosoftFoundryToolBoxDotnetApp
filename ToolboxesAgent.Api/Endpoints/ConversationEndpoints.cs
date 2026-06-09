@@ -10,7 +10,7 @@ public static partial class ConversationEndpoints
         app.MapPost("/conversations", CreateConversationAsync);
     }
 
-    private static async Task<IResult> CreateConversationAsync(MsftFoundryService service)
+    private static async Task<IResult> CreateConversationAsync(AgentService service)
     {
         var conversationId = await service.CreateConversationAsync();
 

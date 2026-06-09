@@ -1,6 +1,6 @@
 namespace ToolboxesAgent.Api.Services;
 
-public class MsftFoundryOptions
+public class ApplicationOptions
 {
     public string ProjectEndpoint { get; set; } = string.Empty;
     public string ModelDeploymentName { get; set; } = string.Empty;
