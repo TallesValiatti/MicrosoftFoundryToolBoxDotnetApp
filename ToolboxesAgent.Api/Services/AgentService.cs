@@ -1,96 +1,89 @@
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using Azure.AI.Projects;
 using Azure.AI.Projects.Agents;
 using Azure.Core;
-using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
-using ModelContextProtocol.Client;
 using OpenAI.Responses;
-using ToolboxesAgent.Api.Handlers;
 
 namespace ToolboxesAgent.Api.Services;
 
 public class AgentService(
-    IOptions<ApplicationOptions> options,
-    TokenCredential credential)
+    IOptions<FoundryOptions> options,
+    TokenCredential credential,
+    IHttpClientFactory httpClientFactory)
 {
-    private const string FoundryScope = "https://ai.azure.com/.default";
-    private const string ToolboxPreviewHeaderName = "Foundry-Features";
-    private const string ToolboxPreviewHeaderValue = "Toolboxes=V1Preview";
+    private const string ManagementScope = "https://management.azure.com/.default";
 
-    private readonly ApplicationOptions _options = options.Value;
+    private readonly FoundryOptions _options = options.Value;
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
-    private readonly Dictionary<string, AgentSession> _sessions = new();
-    private bool _toolboxInitialized;
+    private ProjectsAgentVersion? _agentVersion;
 
-    public async Task<string> CreateConversationAsync()
+    public async Task<string> CreateConversationAsync(CancellationToken cancellationToken = default)
     {
+        await EnsureFoundryResourcesAsync(cancellationToken);
+
         AIProjectClient projectClient = CreateProjectClient();
 
-        await EnsureToolboxAsync(projectClient);
+        Azure.AI.Extensions.OpenAI.ProjectConversation conversation = await projectClient.ProjectOpenAIClient
+            .GetProjectConversationsClient()
+            .CreateProjectConversationAsync(
+                new Azure.AI.Extensions.OpenAI.ProjectConversationCreationOptions(),
+                cancellationToken);
 
-        string toolboxEndpoint = GetToolboxConsumerEndpoint();
-        AIAgent agent = await CreateAgentAsync(projectClient, toolboxEndpoint);
-
-        AgentSession session = await agent.CreateSessionAsync();
-
-        string conversationId = Guid.NewGuid().ToString("N");
-
-        lock (_sessions)
-        {
-            _sessions[conversationId] = session;
-        }
-
-        return conversationId;
+        return conversation.Id;
     }
 
-    public async Task<string> SendMessageAsync(string conversationId, string message)
+    public async Task<string> SendMessageAsync(
+        string conversationId,
+        string userMessage,
+        CancellationToken cancellationToken = default)
     {
+        await EnsureFoundryResourcesAsync(cancellationToken);
+
         AIProjectClient projectClient = CreateProjectClient();
 
-        await EnsureToolboxAsync(projectClient);
+        Azure.AI.Extensions.OpenAI.AgentReference agentReference = new(name: _options.AgentName, version: null);
 
-        string toolboxEndpoint = GetToolboxConsumerEndpoint();
-        AIAgent agent = await CreateAgentAsync(projectClient, toolboxEndpoint);
+        Azure.AI.Extensions.OpenAI.ProjectResponsesClient responsesClient = projectClient.ProjectOpenAIClient
+            .GetProjectResponsesClientForAgent(
+                defaultAgent: agentReference,
+                defaultConversationId: conversationId);
 
-        AgentSession session;
+        ResponseResult response = await responsesClient.CreateResponseAsync(
+            userInputText: userMessage,
+            previousResponseId: null,
+            cancellationToken: cancellationToken);
 
-        lock (_sessions)
-        {
-            if (!_sessions.TryGetValue(conversationId, out session!))
-            {
-                throw new InvalidOperationException(
-                    $"Conversation '{conversationId}' was not found. Create a conversation before sending messages.");
-            }
-        }
-
-        AgentResponse response = await agent.RunAsync(
-            message: message,
-            session: session);
-
-        return response.Text;
+        return response.GetOutputText();
     }
 
-    private AIProjectClient CreateProjectClient() =>
-        new(
-            endpoint: new Uri(_options.ProjectEndpoint),
-            tokenProvider: credential);
-
-    private async Task EnsureToolboxAsync(AIProjectClient projectClient)
+    private async Task EnsureFoundryResourcesAsync(CancellationToken cancellationToken)
     {
-        if (_toolboxInitialized)
+        if (_agentVersion is not null)
             return;
 
-        await _initializationLock.WaitAsync();
+        await _initializationLock.WaitAsync(cancellationToken);
 
         try
         {
-            if (_toolboxInitialized)
+            if (_agentVersion is not null)
                 return;
 
-            await CreateToolboxVersionAsync(projectClient);
+            AIProjectClient projectClient = CreateProjectClient();
 
-            _toolboxInitialized = true;
+            ToolboxVersion toolboxVersion = await CreateToolboxVersionAsync(projectClient, cancellationToken);
+
+            string toolboxMcpEndpoint = BuildToolboxMcpEndpoint();
+
+            await CreateProjectConnectionAsync(toolboxMcpEndpoint, cancellationToken);
+
+            _agentVersion = CreateAgentVersion(projectClient, toolboxMcpEndpoint);
+
+            Console.WriteLine($"Toolbox: {toolboxVersion.Name} v{toolboxVersion.Version}");
+            Console.WriteLine($"Toolbox MCP endpoint: {toolboxMcpEndpoint}");
+            Console.WriteLine($"Project connection: {_options.ProjectConnectionName}");
+            Console.WriteLine($"Agent: {_agentVersion.Name} v{_agentVersion.Version}");
         }
         finally
         {
@@ -98,88 +91,102 @@ public class AgentService(
         }
     }
 
-    private async Task CreateToolboxVersionAsync(AIProjectClient projectClient)
+    private AIProjectClient CreateProjectClient() =>
+        new(
+            endpoint: new Uri(_options.ProjectEndpoint),
+            tokenProvider: credential);
+
+    private async Task<ToolboxVersion> CreateToolboxVersionAsync(
+        AIProjectClient projectClient,
+        CancellationToken cancellationToken)
     {
         AgentToolboxes toolboxClient =
             projectClient.AgentAdministrationClient.GetAgentToolboxes();
 
-        ProjectsAgentTool microsoftLearnMcpTool = ProjectsAgentTool.AsProjectTool(
-            ResponseTool.CreateMcpTool(
-                serverLabel: "microsoft-learn",
-                serverUri: new Uri("https://learn.microsoft.com/api/mcp"),
-                toolCallApprovalPolicy: new McpToolCallApprovalPolicy(
-                    GlobalMcpToolCallApprovalPolicy.NeverRequireApproval)));
+        McpTool mcpTool = ResponseTool.CreateMcpTool(
+            serverLabel: _options.ToolboxMcpServerLabel,
+            serverUri: new Uri(_options.ToolboxMcpServerUrl),
+            toolCallApprovalPolicy: new McpToolCallApprovalPolicy(
+                GlobalMcpToolCallApprovalPolicy.NeverRequireApproval));
 
-        ProjectsAgentTool webSearchTool = ProjectsAgentTool.AsProjectTool(
-            ResponseTool.CreateWebSearchTool());
+        ProjectsAgentTool projectTool = ProjectsAgentTool.AsProjectTool(mcpTool);
 
-        ToolboxSearchPreviewTool toolboxSearchTool = new()
+        return await toolboxClient.CreateToolboxVersionAsync(
+            name: _options.ToolboxName,
+            tools: [projectTool],
+            description: _options.ToolboxDescription,
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task CreateProjectConnectionAsync(
+        string toolboxMcpEndpoint,
+        CancellationToken cancellationToken)
+    {
+        AccessToken managementToken = await credential.GetTokenAsync(
+            new TokenRequestContext([ManagementScope]),
+            cancellationToken);
+
+        string requestUri =
+            $"https://management.azure.com{_options.ProjectResourceId.TrimEnd('/')}/connections/{_options.ProjectConnectionName}?api-version=2025-10-01-preview";
+
+        using HttpClient httpClient = httpClientFactory.CreateClient();
+        using HttpRequestMessage request = new(HttpMethod.Put, requestUri);
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", managementToken.Token);
+
+        request.Content = JsonContent.Create(new
         {
-            Name = "ToolBoxSearch",
-            Description = "Search for tools by capability."
+            name = _options.ProjectConnectionName,
+            type = "Microsoft.MachineLearningServices/workspaces/connections",
+            properties = new
+            {
+                authType = "ProjectManagedIdentity",
+                category = "RemoteTool",
+                target = toolboxMcpEndpoint,
+                isSharedToAll = true,
+                audience = _options.ProjectConnectionAudience,
+                metadata = new
+                {
+                    ApiType = "Azure"
+                }
+            }
+        });
+
+        using HttpResponseMessage response = await httpClient.SendAsync(request, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            throw new InvalidOperationException(
+                $"Failed to create Foundry project connection. Status: {(int)response.StatusCode} {response.ReasonPhrase}. Body: {body}");
+        }
+    }
+
+    private ProjectsAgentVersion CreateAgentVersion(
+        AIProjectClient projectClient,
+        string toolboxMcpEndpoint)
+    {
+        McpTool toolboxMcpTool = ResponseTool.CreateMcpTool(
+            serverLabel: _options.AgentMcpServerLabel,
+            serverUri: new Uri(toolboxMcpEndpoint),
+            toolCallApprovalPolicy: new McpToolCallApprovalPolicy(
+                GlobalMcpToolCallApprovalPolicy.NeverRequireApproval));
+
+        toolboxMcpTool.ProjectConnectionId = _options.ProjectConnectionName;
+
+        DeclarativeAgentDefinition agentDefinition = new(_options.ModelDeploymentName)
+        {
+            Instructions = _options.AgentInstructions,
+            Tools = { toolboxMcpTool }
         };
 
-        ToolboxVersion toolboxVersion = await toolboxClient.CreateToolboxVersionAsync(
-            name: _options.ToolboxName,
-            tools:
-            [
-                microsoftLearnMcpTool,
-                webSearchTool,
-                toolboxSearchTool
-            ],
-            description: "Toolbox with Microsoft Learn MCP, Web Search and Tool Search.");
-
-        Console.WriteLine($"Toolbox created: {toolboxVersion.Name}");
-        Console.WriteLine($"Toolbox version: {toolboxVersion.Version}");
-        Console.WriteLine($"Toolbox MCP endpoint: {GetToolboxConsumerEndpoint()}");
+        return projectClient.AgentAdministrationClient.CreateAgentVersion(
+            agentName: _options.AgentName,
+            options: new(agentDefinition));
     }
 
-    private async Task<AIAgent> CreateAgentAsync(
-        AIProjectClient projectClient,
-        string toolboxEndpoint)
-    {
-        IList<AITool> toolboxTools = await LoadToolboxToolsAsync(toolboxEndpoint);
-
-        return projectClient.AsAIAgent(
-            model: _options.ModelDeploymentName,
-            name: _options.AgentName,
-            instructions: _options.AgentInstructions,
-            tools: toolboxTools);
-    }
-
-    private async Task<IList<AITool>> LoadToolboxToolsAsync(string toolboxEndpoint)
-    {
-        using var httpClient = new HttpClient(
-            new BearerTokenHandler(
-                credential,
-                FoundryScope));
-
-        await using McpClient mcpClient = await McpClient.CreateAsync(
-            new HttpClientTransport(
-                new HttpClientTransportOptions
-                {
-                    Endpoint = new Uri(toolboxEndpoint),
-                    Name = "foundry-toolbox",
-                    TransportMode = HttpTransportMode.StreamableHttp,
-                    AdditionalHeaders = new Dictionary<string, string>
-                    {
-                        [ToolboxPreviewHeaderName] = ToolboxPreviewHeaderValue
-                    }
-                },
-                httpClient));
-
-        IList<McpClientTool> mcpTools = await mcpClient.ListToolsAsync();
-
-        Console.WriteLine("Tools loaded from Foundry Toolbox:");
-
-        foreach (McpClientTool tool in mcpTools)
-        {
-            Console.WriteLine($"- {tool.Name}");
-        }
-
-        return [.. mcpTools.Cast<AITool>()];
-    }
-
-    private string GetToolboxConsumerEndpoint() =>
+    private string BuildToolboxMcpEndpoint() =>
         $"{_options.ProjectEndpoint.TrimEnd('/')}/toolboxes/{_options.ToolboxName}/mcp?api-version=v1";
 }

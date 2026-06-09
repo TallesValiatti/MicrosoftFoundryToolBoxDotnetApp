@@ -6,9 +6,10 @@ using ToolboxesAgent.Api.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
+builder.Services.AddHttpClient();
 
-builder.Services.Configure<ApplicationOptions>(
-    builder.Configuration.GetSection("Application"));
+builder.Services.Configure<FoundryOptions>(
+    builder.Configuration.GetSection("Foundry"));
 
 builder.Services.AddSingleton<TokenCredential>(new DefaultAzureCredential());
 builder.Services.AddSingleton<AgentService>();
