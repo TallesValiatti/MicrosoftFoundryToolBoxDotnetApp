@@ -77,9 +77,9 @@ To test with the included HTTP file, open `ToolboxesAgent.Api.http` in VS Code a
 
 ## References
 
-Microsoft Foundry Agent Service overview: https://learn.microsoft.com/en-us/azure/foundry/agents/overview
-Foundry Toolboxes: https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/toolbox
-Responses API: https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses
-Azure.AI.Projects.OpenAI package: https://learn.microsoft.com/en-us/dotnet/api/overview/azure/ai.projects.openai-readme?view=azure-dotnet-preview
-Microsoft Learn MCP Server: https://learn.microsoft.com/en-us/training/support/mcp
-DefaultAzureCredential: https://learn.microsoft.com/en-us/dotnet/azure/sdk/authentication/credential-chains#defaultazurecredential-overview
+Microsoft Foundry Agent Service overview: https://learn.microsoft.com/en-us/azure/foundry/agents/overview  
+Foundry Toolboxes: https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/toolbox  
+Responses API: https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses  
+Azure.AI.Projects.OpenAI package: https://learn.microsoft.com/en-us/dotnet/api/overview/azure/ai.projects.openai-readme?view=azure-dotnet-preview  
+Microsoft Learn MCP Server: https://learn.microsoft.com/en-us/training/support/mcp  
+DefaultAzureCredential: https://learn.microsoft.com/en-us/dotnet/azure/sdk/authentication/credential-chains#defaultazurecredential-overview  
